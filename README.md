@@ -42,16 +42,45 @@ pip install -r requirements.txt
 6. Connect your logic to the Streamlit UI in `app.py`.
 7. Refine UML so it matches what you actually built.
 
+## 🧩 Implementation Summary
+
+The backend lives in `pawpal_system.py` as five small classes, and `main.py` is a CLI demo that uses them.
+
+| Class | What it does |
+|---|---|
+| `PetOwner` | Owns the pets and collects every task through `get_all_tasks()`. |
+| `Pet` | Holds a pet's profile and its care routines. |
+| `CareRoutine` | A recurring activity (for example "Feed Luna every day at 8 AM") that generates tasks. |
+| `CareTask` | One dated occurrence of a routine, which can be completed or rescheduled. |
+| `Scheduler` | Organizes tasks across all pets: today's list, overdue, upcoming, filtering and conflicts. |
+
+**How they work together**
+
+1. A `PetOwner` has many `Pet`s, a `Pet` has many `CareRoutine`s, and a `CareRoutine` generates many `CareTask`s.
+2. Adding a routine with `Pet.add_routine()` links it to the pet and generates its tasks for the next 90 days. A routine repeats once, daily, weekly or monthly, every N units, between a start date and an optional end date. Each routine also has a duration in minutes and a priority (low, medium or high), which its tasks inherit.
+3. The `Scheduler` gets all tasks from `PetOwner.get_all_tasks()`, which walks pets, then routines, then tasks. It sorts and filters them, so the today view, the overdue view and conflict detection (tasks whose times overlap) all start from that one list.
+
+**Behaviors worth knowing**
+
+- Tasks are only generated from today forward, so a deleted overdue task never comes back.
+- A task the user rescheduled is never overwritten when its routine is regenerated.
+- Removing a routine deletes its pending tasks but keeps completed ones as history.
+- Invalid edits (an unknown field, an interval below 1) raise an error instead of silently changing data.
+
+Run the tests with `python -m pytest`.
+
 ## 🖥️ Sample Output
 
-Paste a sample of your app's CLI or Streamlit output here so a reader can see what a generated plan looks like:
+Running `python main.py` prints today's schedule for the owner, sorted by time:
 
 ```
-# e.g.:
-# Daily plan for Biscuit (Golden Retriever):
-#   08:00 — Morning walk (30 min) [priority: high]
-#   09:00 — Feeding (10 min) [priority: high]
-#   ...
+Today's Schedule
+Owner: Karina
+Date: 2026-10-16
+------------------------------------------------------------
+08:00 | Luna     | Breakfast            | Pending
+09:30 | Mochi    | Morning walk         | Pending
+18:00 | Luna     | Brush fur            | Pending
 ```
 
 ## 🧪 Testing PawPal+
