@@ -7,16 +7,16 @@
 - Briefly describe your initial UML design.
 - What classes did you include, and what responsibilities did you assign to each?
 
-My UML design includes five main classes: PetOwner, Pet, CareRoutine, CareTask, and Scheduler, plus a DailyPlan result dataclass. The design below is the current working version saved in diagrams/uml_draft.mmd, and the changes I made since my first draft are described in section 1b.
+My UML design includes five main classes: PetOwner, Pet, CareRoutine, CareTask, and Scheduler, plus a DailyPlan result dataclass. The final diagram is saved in diagrams/uml_final.mmd, and the changes I made since my first draft are described in section 1b.
 A pet owner can manage multiple pets, each with recurring care routines such as feeding or walking. These routines generate tasks with a scheduled date, time, and completion status.
 The design supports three core features: managing pet profiles, organizing regular care, and viewing and completing today’s tasks. Routines create their first pending occurrence when added. Generating a schedule fills matching occurrences for the selected day, and completing a task creates or reuses its next occurrence.
 
 Responsibilities I assigned to each class:
-- PetOwner: the user of the app. It keeps the list of pets, adds and removes them, and gathers tasks across all pets. Optional time limits remain supported for direct Python callers; the Streamlit app clears them to include all scheduled care. Overdue incomplete tasks are listed separately and can be cleared.
+- PetOwner: the user of the app. It keeps the list of pets, adds and removes them, and gathers tasks across all pets. Optional time limits remain supported in the backend; the Streamlit app clears them to include all scheduled care. Overdue incomplete tasks are listed separately and can be cleared.
 - Pet: holds one pet's profile (species, breed, birthday, photo, needs, care instructions) and keeps its own care routines, so the profile can be updated and routines attached or removed.
 - CareRoutine: a recurring care activity for one pet, such as feeding or walking. It stores how often, at what time, for how long and how important the care is, plus its care category. It seeds one pending occurrence by default and can fill matching occurrences in a bounded date range for calendar scheduling. Completion creates or reuses the next occurrence from the completion date. Future repeating tasks cannot be completed before their scheduled day.
 - CareTask: a single dated instance of a routine. It copies the routine's duration and priority, tracks whether it was completed, and can be rescheduled.
-- Scheduler: organizes tasks across all pets. It gets every task through PetOwner.get_all_tasks(), then builds today's, overdue and upcoming lists, filters by pet or status, orders tasks that start at the same time by priority, and finds tasks whose times overlap. Its build_daily_plan() method includes all of the day's existing care by default. Direct Python callers can still apply time limits, which select pending tasks by priority. It returns tasks in time order with a reason for each inclusion or exclusion. Completed care stays visible and counts toward any care-time allowance. It returns shared warning text for the CLI and UI through conflict_warning(). It can also suggest the next free time slot for Python callers and the CLI. The app instead lets the owner choose a new date and time or keep both tasks, storing acceptance of that exact overlap in session state. When a recurring task is marked complete, it asks the routine to create the next occurrence from today's date.
+- Scheduler: organizes tasks across all pets. It gets every task through PetOwner.get_all_tasks(), then builds today's, overdue and upcoming lists, filters by pet or status, orders tasks that start at the same time by priority, and finds tasks whose times overlap. Its build_daily_plan() method includes all of the day's existing care by default. The backend can still apply time limits, which select pending tasks by priority. It returns tasks in time order with a reason for each inclusion or exclusion. Completed care stays visible and counts toward any care-time allowance. It returns shared warning text for the CLI and UI through conflict_warning(). It can also suggest the next free time slot through the backend and CLI. The app instead lets the owner choose a new date and time or keep both tasks, storing acceptance of that exact overlap in session state. When a recurring task is marked complete, it asks the routine to create the next occurrence from today's date.
 - DailyPlan: holds included and excluded tasks, explanations keyed by task ID, and completed, planned and remaining minutes. Creating a plan does not change the tasks.
 
 I split routines from tasks so that a recurring activity is defined once and its daily occurrences can be completed or rescheduled on their own.
@@ -69,6 +69,8 @@ Yes, my design changed during implementation. I added a **Scheduler class** that
 - What constraints does your scheduler consider (for example: time, priority, preferences)?
 - How did you decide which constraints mattered most?
 
+The scheduler considers dates, times, duration, recurrence, completion status, and priority. I prioritized keeping all scheduled care visible and warning about overlaps so the owner stays in control. Priority breaks ties; optional backend preferences can also limit availability and daily care minutes.
+
 **b. Tradeoffs**
 
 - Describe one tradeoff your scheduler makes.
@@ -90,6 +92,14 @@ I initially used AI for design brainstorming: turning my class list into a Merma
 
 Specific review questions worked best, such as "ensure the relationships make sense and that I haven't included unnecessary complexity" and "any gray areas regarding my 3 core functionalities?". Asking "why are you suggesting this?" or "what do you recommend and why?" before approving a change also helped, because I understood each decision before it went into the code.
 
+- Which AI coding assistant features were most effective?
+
+Codebase review, coordinated file edits, and running tests were the most useful features. They helped me keep the UML, scheduling logic, and interface consistent while checking changes quickly.
+
+- How did separate chat sessions help you stay organized?
+
+Separate chats for design, coding, and debugging kept each discussion focused and decisions easier to find. I carried agreed class responsibilities between chats to keep the design consistent.
+
 **b. Judgment and verification**
 
 - Describe one moment where you did not accept an AI suggestion as-is.
@@ -105,7 +115,7 @@ I tested task completion and task addition through set_completion_status() and a
 
 - How did you evaluate or verify what the AI suggested?
 
-I asked the AI to lay out every agreed change in the chat before it edited any file, and I approved the changes first. I compared the class lists in this file against the UML diagram line by line. I also ran my two pytest tests with python -m pytest (2 passed) and the main.py demo, and saved the demo's output in the README.
+I asked the AI to lay out every agreed change in the chat before it edited any file, and I approved the changes first. I compared the class lists in this file against the UML diagram line by line. I initially ran two pytest tests with python -m pytest (2 passed); the suite has since grown to 14 passing backend tests. I also ran the main.py demo and saved its output in the README.
 
 ---
 
@@ -116,10 +126,14 @@ I asked the AI to lay out every agreed change in the chat before it edited any f
 - What behaviors did you test?
 - Why were these tests important?
 
+The expanded test suite checks completion, routine creation, sorting, recurrence, filtering, plan totals, optional limits, conflicts, rescheduling, and overdue cleanup. These tests help catch incorrect scheduling and protect completed history.
+
 **b. Confidence**
 
 - How confident are you that your scheduler works correctly?
 - What edge cases would you test next if you had more time?
+
+I am confident in the main workflows: all 14 backend tests pass. Next, I would test month-end and leap-year recurrence, repeated completion, overnight overlaps, and automated interface interactions.
 
 ---
 
@@ -129,10 +143,16 @@ I asked the AI to lay out every agreed change in the chat before it edited any f
 
 - What part of this project are you most satisfied with?
 
+I am most satisfied with separating routines, individual tasks, and scheduling. Each has a clear responsibility, which makes recurrence and rescheduling easier to understand.
+
 **b. What you would improve**
 
 - If you had another iteration, what would you improve or redesign?
 
+I would add persistent storage so pet profiles and care records survive new sessions, then expand recurrence and interface testing.
+
 **c. Key takeaway**
 
 - What is one important thing you learned about designing systems or working with AI on this project?
+
+I learned to ask why a suggested method belongs in a class before accepting it. This helped me keep responsibilities clear and avoid unnecessary complexity. Being the lead architect means owning the design decisions and verifying the code AI helps produce.

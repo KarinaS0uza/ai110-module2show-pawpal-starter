@@ -58,15 +58,44 @@ st.html("""
 .care-badge.medium { background: light-dark(#f3f0e7, #373125); color: light-dark(#725b24, #e5d6ac); }
 .care-badge.low { background: light-dark(#f0f2f6, #262730); color: light-dark(#626671, #c2c5ce); }
 .care-badge.overlap { background: light-dark(#fee8e8, #49242b); color: light-dark(#8c2430, #ffc6cb); }
+[class*="st-key-care_total_"] [data-testid="stMetric"] {
+    color-scheme: PAWPAL_SCHEME;
+    padding: 0;
+    border-radius: 10px;
+}
+[class*="st-key-care_total_"] [data-testid="stMetric"] > div {
+    padding: 12px 16px;
+}
+[class*="st-key-care_total_"] [data-testid="stMetricLabel"] {
+    color: inherit;
+    font-size: 13px;
+}
+[class*="st-key-care_total_"] [data-testid="stMetricValue"] {
+    color: inherit;
+    font-size: 26px;
+    font-weight: 600;
+}
+.st-key-care_total_completed [data-testid="stMetric"] {
+    background: light-dark(#edf7f1, #192f26);
+    border-color: light-dark(#c5e3d2, #355b49);
+    color: light-dark(#286344, #b9e4cc);
+}
+.st-key-care_total_planned [data-testid="stMetric"] {
+    background: light-dark(#f3effb, #2c243d);
+    border-color: light-dark(#ddd0ef, #514066);
+    color: light-dark(#65428c, #ddc9f4);
+}
 </style>
 """.replace("PAWPAL_SCHEME", color_scheme))
 
 
 def describe_repeat(routine: CareRoutine) -> str:
     """Plain-language repeat pattern, such as "Every 2 weeks"."""
-    if routine.frequency is Frequency.ONCE:
+    # Session routines can retain enum instances from before a code reload.
+    frequency = Frequency(routine.frequency.value)
+    if frequency is Frequency.ONCE:
         return f"Once on {routine.start_date}"
-    unit = {Frequency.DAILY: "day", Frequency.WEEKLY: "week", Frequency.MONTHLY: "month"}[routine.frequency]
+    unit = {Frequency.DAILY: "day", Frequency.WEEKLY: "week", Frequency.MONTHLY: "month"}[frequency]
     return f"Every {unit}" if routine.interval == 1 else f"Every {routine.interval} {unit}s"
 
 
@@ -135,21 +164,6 @@ def set_done(task: CareTask, key: str) -> None:
         task.set_completion_status(False)
 
 
-def filter_plan_tasks(
-    owner: PetOwner,
-    tasks: list[CareTask],
-    pet_name: str | None = None,
-    completed: bool | None = None,
-) -> list[CareTask]:
-    """Filter an ordered plan list by pet and status without reloading or sorting tasks."""
-    wanted = pet_name.casefold() if pet_name is not None else None
-    return [
-        task for task in tasks
-        if (wanted is None or owner.get_pet_for_task(task).name.casefold() == wanted)
-        and (completed is None or task.completion_status == completed)
-    ]
-
-
 def format_time_range(start: datetime, end: datetime) -> str:
     """Format a compact AM/PM range, noting care that finishes on a later day."""
     first = start.strftime("%I:%M%p" if start.minute else "%I%p").lstrip("0")
@@ -198,7 +212,7 @@ def show_plan_tasks(
                 st.session_state[done_key] = task.completion_status
                 future_repeat = (
                     not task.completion_status and task.scheduled_date_time.date() > date.today()
-                    and owner.get_routine_for_task(task).frequency is not Frequency.ONCE
+                    and owner.get_routine_for_task(task).frequency.value != Frequency.ONCE.value
                 )
                 columns[-1].checkbox(
                     f"Done: {pet.name} {task.title}", key=done_key, label_visibility="collapsed",
@@ -301,49 +315,58 @@ else:
             index=owner.pets.index(owner.get_pet_for_task(editing_task)) if editing_task else 0,
             disabled=editing_task is not None,
         )
-        task_title = st.text_input(
-            "Task title", value=editing_task.title if editing_task else "Morning walk",
-            disabled=editing_task is not None,
-        )
-        col1, col2, col3 = st.columns(3)
-        with col1:
+        title_col, category_col = st.columns(2)
+        with title_col:
+            task_title = st.text_input(
+                "Task title", value=editing_task.title if editing_task else "Morning walk",
+                disabled=editing_task is not None,
+            )
+        with category_col:
+            care_category = st.selectbox(
+                "Care category", CARE_CATEGORIES,
+                index=CARE_CATEGORIES.index(editing_routine.category) if editing_routine else 0,
+                disabled=editing_task is not None,
+            )
+
+        start_col, end_col = st.columns(2)
+        with start_col:
+            start_date = st.date_input(
+                "Start date", value=editing_task.scheduled_date_time.date() if editing_task else date.today(),
+            )
+        with end_col:
+            end_date = st.date_input(
+                "End date (optional)", value=editing_routine.end_date if editing_routine else None,
+                disabled=editing_task is not None,
+            )
+
+        time_col, duration_col = st.columns(2)
+        with time_col:
+            scheduled_time = st.time_input("Time", value=editing_task.scheduled_date_time.time() if editing_task else time(8))
+        with duration_col:
             duration = st.number_input(
                 "Duration (minutes)", min_value=1, max_value=max(240, editing_task.duration_minutes) if editing_task else 240,
                 value=editing_task.duration_minutes if editing_task else 30, disabled=editing_task is not None,
             )
-        with col2:
-            priority = st.selectbox(
-                "Priority", list(Priority), format_func=lambda p: p.value.title(),
-                index=list(Priority).index(Priority(editing_task.priority.value)) if editing_task else 1,
-                disabled=editing_task is not None,
-            )
-        with col3:
-            scheduled_time = st.time_input("Time", value=editing_task.scheduled_date_time.time() if editing_task else time(8))
-        col4, col5, col6 = st.columns(3)
-        with col4:
+
+        repeat_col, interval_col, priority_col = st.columns(3)
+        with repeat_col:
             frequency = st.selectbox(
                 "Repeats", list(Frequency), format_func=lambda f: f.value.title(),
                 index=list(Frequency).index(Frequency(editing_routine.frequency.value)) if editing_routine else 0,
                 disabled=editing_task is not None,
             )
-        with col5:
+        with interval_col:
             interval = st.number_input(
-                "Every N (days, weeks or months)", min_value=1,
+                "Every N", min_value=1,
                 value=editing_routine.interval if editing_routine else 1, disabled=editing_task is not None,
+                help="Days, weeks or months, based on the repeat pattern.",
             )
-        with col6:
-            start_date = st.date_input(
-                "Start date", value=editing_task.scheduled_date_time.date() if editing_task else date.today(),
+        with priority_col:
+            priority = st.selectbox(
+                "Priority", list(Priority), format_func=lambda p: p.value.title(),
+                index=list(Priority).index(Priority(editing_task.priority.value)) if editing_task else 1,
+                disabled=editing_task is not None,
             )
-        end_date = st.date_input(
-            "End date (optional)", value=editing_routine.end_date if editing_routine else None,
-            disabled=editing_task is not None,
-        )
-        care_category = st.selectbox(
-            "Care category", CARE_CATEGORIES,
-            index=CARE_CATEGORIES.index(editing_routine.category) if editing_routine else 0,
-            disabled=editing_task is not None,
-        )
 
         submit = st.form_submit_button("Reschedule task" if editing_task else "Add task")
         cancel = st.form_submit_button("Cancel") if editing_task else False
@@ -436,33 +459,47 @@ with schedule_tab:
         plan = scheduler.generate_schedule(selected_day)
         pet_name = None if pet_choice == "All pets" else pet_choice
         completed = {"All": None, "Pending": False, "Completed": True}[status_choice]
-        included = filter_plan_tasks(owner, plan.included, pet_name, completed)
-        excluded = filter_plan_tasks(owner, plan.excluded, pet_name, completed)
+        visible_ids = {task.task_id for task in scheduler.filter_tasks(pet_name, completed)}
+        included = [task for task in plan.included if task.task_id in visible_ids]
+        excluded = [task for task in plan.excluded if task.task_id in visible_ids]
         day_conflicts = find_unaccepted_overlaps(scheduler, selected_day)
         conflict_ids = {task.task_id for group in day_conflicts for task in group}
         st.markdown(f"**Tasks for {selected_day:%A, %B %d, %Y}**")
         totals = st.columns(2)
-        totals[0].metric("Completed care", f"{plan.completed_minutes} min")
-        totals[1].metric("Planned care", f"{plan.planned_minutes} min")
+        with totals[0].container(key="care_total_completed"):
+            st.metric("Completed care", f"{plan.completed_minutes} min", border=True)
+        with totals[1].container(key="care_total_planned"):
+            st.metric("Planned care", f"{plan.planned_minutes} min", border=True)
         st.subheader("Today's plan", anchor="todays-plan")
-        if included:
-            show_plan_tasks(owner, included, conflict_ids)
-        else:
-            st.info("No tasks in this view.")
+        st.caption(
+            f"Showing {len(included)} of {len(plan.included)} tasks, sorted by time, then priority and title. "
+            "Filters only change visible rows; care totals and overlap reviews still cover all pets."
+        )
 
         for pair in day_conflicts:
             key = overlap_key(pair)
             overlap_start = max(datetime.combine(selected_day, time.min), *(task.scheduled_date_time for task in pair))
             overlap_end = min(datetime.combine(selected_day + timedelta(days=1), time.min), *(task.end_date_time for task in pair))
-            st.markdown(
-                badge_html(f"{format_time_range(overlap_start, overlap_end)} · Overlap", "overlap", scheduler.conflict_warning(pair)),
-                unsafe_allow_html=True,
+            st.warning(
+                f"**Overlapping care: {format_time_range(overlap_start, overlap_end)}**\n\n"
+                f"{scheduler.conflict_warning(pair)}\n\n"
+                "Choose **Reschedule a task** to move one occurrence, or **Keep both** "
+                "if you can do this care together. Keeping both acknowledges the overlap without moving either task.",
+                icon="⚠️",
             )
             with st.container(horizontal=True):
                 st.button(
                     "Reschedule a task", key=f"edit_{key}", on_click=begin_rescheduling, args=(pair,),
                 )
                 st.button("Keep both", key=f"keep_{key}", on_click=accept_overlap, args=(pair,))
+
+        if not day_conflicts and (plan.included or plan.excluded):
+            st.success("No overlaps need review for this day.")
+
+        if included:
+            show_plan_tasks(owner, included, conflict_ids)
+        else:
+            st.info("No tasks in this view.")
 
         if excluded:
             st.subheader("Not included in this plan")

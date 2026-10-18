@@ -1,0 +1,135 @@
+classDiagram
+
+    class Frequency {
+        <<enumeration>>
+        ONCE
+        DAILY
+        WEEKLY
+        MONTHLY
+    }
+
+    class Priority {
+        <<enumeration>>
+        LOW
+        MEDIUM
+        HIGH
+        +int rank
+    }
+
+    class PetOwner {
+        <<dataclass>>
+        +int owner_id
+        +str name
+        +str email
+        +List~Pet~ pets
+        +Optional~time~ available_start
+        +Optional~time~ available_end
+        +Optional~int~ daily_care_minutes
+        +set_preferences(available_start=None, available_end=None, daily_care_minutes=None) None
+        +add_pet(pet) None
+        +remove_pet(pet) None
+        +get_all_tasks() List~CareTask~
+        +get_pet_for_task(task) Pet
+        +get_routine_for_task(task) CareRoutine
+        +view_todays_tasks() List~CareTask~
+        +view_overdue_tasks() List~CareTask~
+        +clear_overdue_tasks() None
+    }
+
+    class Pet {
+        <<dataclass>>
+        +int pet_id
+        +str name
+        +str species
+        +str breed
+        +Optional~date~ birthday
+        +str photo
+        +str pet_needs
+        +str care_instructions
+        +List~CareRoutine~ routines
+        +update_profile(fields) None
+        +get_care_routines() List~CareRoutine~
+        +add_routine(routine) None
+        +remove_routine(routine) None
+    }
+
+    class CareRoutine {
+        <<dataclass>>
+        +int routine_id
+        +Optional~int~ pet_id
+        +str title
+        +Frequency frequency
+        +int interval
+        +time scheduled_time
+        +date start_date
+        +Optional~date~ end_date
+        +int duration_minutes
+        +Priority priority
+        +bool is_active
+        +List~CareTask~ tasks
+        +str category
+        +update_routine(fields) None
+        +generate_tasks(range_start, range_end, first_only=True) List~CareTask~
+        +add_task(scheduled_date_time) CareTask
+        +complete_task(task) Optional~CareTask~
+        +get_tasks() List~CareTask~
+    }
+
+    class CareTask {
+        <<dataclass>>
+        +int task_id
+        +Optional~int~ routine_id
+        +str title
+        +datetime scheduled_date_time
+        +datetime original_date_time
+        +int duration_minutes
+        +Priority priority
+        +bool completion_status
+        +bool is_rescheduled
+        +datetime end_date_time
+        +set_completion_status(completion_status) None
+        +reschedule(new_date_time) None
+    }
+
+    class DailyPlan {
+        <<dataclass>>
+        +List~CareTask~ included
+        +List~CareTask~ excluded
+        +dict reasons
+        +int completed_minutes
+        +int planned_minutes
+        +Optional~int~ remaining_minutes
+    }
+
+    class Scheduler {
+        <<dataclass>>
+        +PetOwner owner
+        +sort_by_time(tasks=None) List~CareTask~
+        +get_tasks() List~CareTask~
+        +tasks_on(day) List~CareTask~
+        +todays_tasks() List~CareTask~
+        +generate_schedule(day) DailyPlan
+        +build_daily_plan(day) DailyPlan
+        +overdue_tasks() List~CareTask~
+        +upcoming_tasks(days=7) List~CareTask~
+        +filter_tasks(pet_name=None, completed=None) List~CareTask~
+        +find_conflicts() List~List~CareTask~~
+        +conflict_warning(group) str
+        +next_free_slot(duration, after, exclude_task_id=None) datetime
+        +mark_task_complete(task) Optional~CareTask~
+    }
+
+    PetOwner "1" *-- "0..*" Pet : pets
+    Pet "1" *-- "0..*" CareRoutine : routines
+    CareRoutine "1" *-- "0..*" CareTask : tasks
+    CareRoutine ..> Frequency : recurrence pattern
+    CareRoutine ..> Priority : task priority
+    CareTask ..> Priority : priority copied from routine
+
+    Scheduler "0..*" --> "1" PetOwner : owner reference and get_all_tasks()
+    PetOwner ..> Scheduler : delegates daily and overdue queries
+    Scheduler ..> CareRoutine : generates occurrences and delegates completion
+    Scheduler ..> CareTask : sorts, filters and detects overlaps
+    Scheduler ..> DailyPlan : builds and returns
+    DailyPlan --> "0..*" CareTask : included references
+    DailyPlan --> "0..*" CareTask : excluded references

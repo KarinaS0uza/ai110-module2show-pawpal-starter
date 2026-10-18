@@ -1,4 +1,4 @@
-"""PawPal+ core classes and scheduling logic, matching diagrams/uml_draft.mmd."""
+"""PawPal+ core classes and scheduling logic, matching diagrams/uml_final.mmd."""
 
 from __future__ import annotations
 
@@ -356,7 +356,7 @@ class Pet:
 
 @dataclass
 class PetOwner:
-    """The user: owns pets and supports optional care time limits through Python."""
+    """The user: owns pets and stores optional care time limits."""
 
     owner_id: int = field(default_factory=lambda: next(_owner_ids), kw_only=True)
     name: str
@@ -495,7 +495,7 @@ class Scheduler:
         return self.build_daily_plan(day)
 
     def build_daily_plan(self, day: date) -> DailyPlan:
-        """Explain all existing care for a day, applying any time limits set through Python."""
+        """Explain all existing care for a day, applying the owner's optional time limits."""
         tasks = self.tasks_on(day)
         completed = [task for task in tasks if task.completion_status]
         completed_minutes = sum(task.duration_minutes for task in completed)
