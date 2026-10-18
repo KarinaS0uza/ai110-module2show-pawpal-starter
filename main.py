@@ -65,9 +65,10 @@ def todays(tasks: list[CareTask], today: date) -> list[CareTask]:
 
 
 def print_tasks(
-    owner: PetOwner, heading: str, tasks: list[CareTask], with_date: bool = False
+    owner: PetOwner, heading: str, tasks: list[CareTask], with_date: bool = False,
+    *, with_priority: bool = False,
 ) -> None:
-    """Print readable task rows, optionally including dates for overdue care."""
+    """Print task rows, optionally including dates or an explicit priority column."""
     print(f"\n{heading}")
     print("-" * 60)
     if not tasks:
@@ -76,7 +77,8 @@ def print_tasks(
         pet = owner.get_pet_for_task(task)
         status = "Completed" if task.completion_status else "Pending"
         when = f"{task.scheduled_date_time:%b %d %H:%M}" if with_date else f"{task.scheduled_date_time:%H:%M}"
-        print(f"{when} | {pet.name:<8} | {task.title:<20} | {status}")
+        priority = f"{task.priority.value.title():<6} | " if with_priority else ""
+        print(f"{priority}{when} | {pet.name:<8} | {task.title:<20} | {status}")
 
 
 def demo_sorting_and_filtering(owner: PetOwner, scheduler: Scheduler, today: date) -> None:
@@ -142,7 +144,7 @@ def demo_overdue(owner: PetOwner, scheduler: Scheduler, today: date, routines: d
 
 
 def demo_daily_planning(today: date) -> None:
-    """Show all scheduled care for a day with explanations and minute totals."""
+    """Show priority-first scheduling, explanations and minute totals."""
     owner = PetOwner(name="Karina", email="karina@example.com")
     owner.add_pet(Pet(name="Luna", species="cat"))
     owner.add_pet(Pet(name="Mochi", species="dog"))
@@ -163,10 +165,15 @@ def demo_daily_planning(today: date) -> None:
         owner.pets[pet_index].add_routine(routine)
         routine.tasks[0].set_completion_status(completed)
 
-    plan = Scheduler(owner).build_daily_plan(today)
+    scheduler = Scheduler(owner)
+    print_tasks(
+        owner, "Today's Schedule (priority first, then time)", scheduler.tasks_on(today),
+        with_priority=True,
+    )
+    plan = scheduler.build_daily_plan(today)
     print("\nDaily care plan")
     print(f"Completed: {plan.completed_minutes} min | Planned: {plan.planned_minutes} min")
-    for heading, tasks in (("Today's plan", plan.included), ("Not included in this plan", plan.excluded)):
+    for heading, tasks in (("Today's plan (priority first, then time)", plan.included), ("Not included in this plan", plan.excluded)):
         print(f"\n{heading}")
         print("-" * 60)
         if not tasks:

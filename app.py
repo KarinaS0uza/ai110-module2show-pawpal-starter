@@ -4,6 +4,7 @@ import os
 from datetime import date, datetime, time, timedelta
 from html import escape
 from itertools import combinations
+from pathlib import Path
 
 import streamlit as st
 
@@ -20,10 +21,39 @@ from pawpal_system import (
 
 st.set_page_config(page_title="PawPal+", page_icon="🐾", layout="centered")
 
+DATA_FILE = Path(__file__).with_name("data.json")
+
 if "owner" not in st.session_state:
-    st.session_state.owner = PetOwner(name="Jordan", email="jordan@example.com")
+    try:
+        st.session_state.owner = PetOwner.load_from_json(DATA_FILE)
+    except FileNotFoundError:
+        st.session_state.owner = PetOwner(name="", email="")
+    except (OSError, ValueError) as error:
+        st.error(f"Could not load saved care: {error}. The saved file has not been changed.")
+        st.stop()
 
 owner = st.session_state.owner
+
+# A backend reload can replace the module while session state keeps the old owner.
+# Use the current class to reserve its IDs before forms create any new objects.
+try:
+    PetOwner.sync_id_counters(owner)
+except ValueError as error:
+    st.error(f"Could not restore current care: {error}. Refresh this page to reload saved care.")
+    st.stop()
+
+
+def save_owner() -> None:
+    """Save entered care, leaving a fresh empty session unsaved."""
+    if not owner.name.strip() and not owner.pets and not DATA_FILE.exists():
+        return
+    try:
+        owner.save_to_json(DATA_FILE)
+    except (OSError, TypeError, ValueError) as error:
+        st.error(f"Your latest changes could not be saved: {error}")
+        st.stop()
+
+
 # Clear limits saved by earlier versions so every scheduled task stays included.
 owner.set_preferences()
 for pet in owner.pets:
@@ -246,7 +276,7 @@ and see today's tasks.
 """
 )
 
-st.caption("Your pets and tasks are kept in this browser session.")
+st.caption("Your pets and tasks are saved automatically and restored when you reopen the app.")
 
 with st.expander("Scenario", expanded=True):
     st.markdown(
@@ -373,12 +403,14 @@ else:
         if cancel:
             st.session_state.pop("reschedule_task_ids", None)
             st.session_state.scroll_target = "todays-plan"
+            save_owner()
             st.rerun()
         if submit:
             if editing_task:
                 move_task(editing_task, datetime.combine(start_date, scheduled_time))
                 st.session_state.pop("reschedule_task_ids", None)
                 st.session_state.scroll_target = "todays-plan"
+                save_owner()
                 st.rerun()
             if not task_title.strip():
                 st.error("Please enter a task title.")
@@ -472,7 +504,7 @@ with schedule_tab:
             st.metric("Planned care", f"{plan.planned_minutes} min", border=True)
         st.subheader("Today's plan", anchor="todays-plan")
         st.caption(
-            f"Showing {len(included)} of {len(plan.included)} tasks, sorted by time, then priority and title. "
+            f"Showing {len(included)} of {len(plan.included)} tasks, sorted by priority (High → Medium → Low), then time. "
             "Filters only change visible rows; care totals and overlap reviews still cover all pets."
         )
 
@@ -546,7 +578,7 @@ with overdue_tab:
                 "normally becomes overdue after its day passes. This button adds two sample tasks dated "
                 "1 and 2 days ago to the pet you choose, so you can try the Overdue tab right away. "
                 "They are not real tasks. Use \"Delete all overdue tasks\" to remove them. "
-                "Nothing is saved when you close or refresh the page."
+                "These examples are saved too, so delete them when you finish testing."
             )
             if owner.pets:
                 st.selectbox(
@@ -571,3 +603,5 @@ if scroll_target in {"schedule-a-task", "todays-plan"}:
         }});</script>''',
         unsafe_allow_javascript=True,
     )
+
+save_owner()

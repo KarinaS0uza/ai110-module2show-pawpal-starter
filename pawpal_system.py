@@ -3,22 +3,33 @@
 from __future__ import annotations
 
 import calendar
+import json
 from copy import copy
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from datetime import date, datetime, time, timedelta
 from enum import Enum
 from itertools import count
+from pathlib import Path
+from tempfile import NamedTemporaryFile
 from typing import Iterator
 
 CARE_CATEGORIES = ("Other", "Exercise", "Play", "Training", "Grooming", "Meal")
 
 # IDs are auto-assigned from one counter per class; nobody types them.
-# Possible future improvement: save data between sessions (for example one JSON file);
-# on load, each counter would restart above the highest saved ID.
-_task_ids = count(1)
-_routine_ids = count(1)
-_pet_ids = count(1)
-_owner_ids = count(1)
+# Keep counters when the module reloads; loading or resuming an owner also reserves its IDs.
+_task_ids = globals().get("_task_ids", count(1))
+_routine_ids = globals().get("_routine_ids", count(1))
+_pet_ids = globals().get("_pet_ids", count(1))
+_owner_ids = globals().get("_owner_ids", count(1))
+
+
+def _json_value(value: object) -> str:
+    """Convert dates, times and enums to readable JSON values."""
+    if isinstance(value, (date, time)):
+        return value.isoformat()
+    if isinstance(value, Enum):
+        return value.value
+    raise TypeError(f"Cannot save {type(value).__name__} as JSON")
 
 
 def _today() -> date:
@@ -52,7 +63,7 @@ class Frequency(Enum):
 
 
 class Priority(Enum):
-    """How important a routine's tasks are; used to order tasks at the same time."""
+    """Task importance; schedules place High before Medium before Low."""
 
     LOW = "low"
     MEDIUM = "medium"
@@ -369,6 +380,106 @@ class PetOwner:
     def __post_init__(self) -> None:
         self.set_preferences(self.available_start, self.available_end, self.daily_care_minutes)
 
+    def sync_id_counters(self) -> None:
+        """Reject invalid or duplicate IDs and reserve all IDs held by this owner."""
+        global _owner_ids, _pet_ids, _routine_ids, _task_ids
+
+        routines = [routine for pet in self.pets for routine in pet.routines]
+        ids = (
+            [self.owner_id],
+            [pet.pet_id for pet in self.pets],
+            [routine.routine_id for routine in routines],
+            [task.task_id for task in self.get_all_tasks()],
+        )
+        for values in ids:
+            if any(type(value) is not int or value < 1 for value in values):
+                raise ValueError("IDs must be positive whole numbers")
+            if len(values) != len(set(values)):
+                raise ValueError("Duplicate IDs in saved data")
+
+        # Never rewind a counter, including IDs assigned outside this owner's graph.
+        _owner_ids, _pet_ids, _routine_ids, _task_ids = (
+            count(max(next(counter), max(values, default=0) + 1))
+            for counter, values in zip((_owner_ids, _pet_ids, _routine_ids, _task_ids), ids)
+        )
+
+    def save_to_json(self, path: str | Path = "data.json") -> None:
+        """Validate IDs and save care, replacing the file only after writing succeeds."""
+        self.sync_id_counters()
+        destination = Path(path)
+        content = json.dumps(asdict(self), default=_json_value, indent=2, ensure_ascii=False) + "\n"
+        temporary_path = None
+        try:
+            with NamedTemporaryFile(
+                mode="w", encoding="utf-8", dir=destination.parent,
+                prefix=f".{destination.name}.", suffix=".tmp", delete=False,
+            ) as temporary:
+                temporary_path = Path(temporary.name)
+                temporary.write(content)
+            temporary_path.replace(destination)
+        finally:
+            if temporary_path is not None:
+                temporary_path.unlink(missing_ok=True)
+
+    @classmethod
+    def load_from_json(cls, path: str | Path = "data.json") -> PetOwner:
+        """Restore saved objects without generating tasks; raise ValueError for invalid data."""
+        data = json.loads(Path(path).read_text(encoding="utf-8"))
+        try:
+            if not isinstance(data, dict):
+                raise ValueError("Expected an owner object")
+            saved_pets = data.pop("pets")
+            if not isinstance(saved_pets, list):
+                raise ValueError("Pets must be a list")
+            for name in ("available_start", "available_end"):
+                if data[name] is not None:
+                    data[name] = time.fromisoformat(data[name])
+            owner = cls(owner_id=data.pop("owner_id"), **data)
+            for saved_pet in saved_pets:
+                pet_data = dict(saved_pet)
+                saved_routines = pet_data.pop("routines")
+                if not isinstance(saved_routines, list):
+                    raise ValueError("Routines must be a list")
+                if pet_data["birthday"] is not None:
+                    pet_data["birthday"] = date.fromisoformat(pet_data["birthday"])
+                pet = Pet(pet_id=pet_data.pop("pet_id"), **pet_data)
+                for saved_routine in saved_routines:
+                    routine_data = dict(saved_routine)
+                    saved_tasks = routine_data.pop("tasks")
+                    if not isinstance(saved_tasks, list):
+                        raise ValueError("Tasks must be a list")
+                    routine_data["frequency"] = Frequency(routine_data["frequency"])
+                    routine_data["priority"] = Priority(routine_data["priority"])
+                    routine_data["scheduled_time"] = time.fromisoformat(routine_data["scheduled_time"])
+                    routine_data["start_date"] = date.fromisoformat(routine_data["start_date"])
+                    if routine_data["end_date"] is not None:
+                        routine_data["end_date"] = date.fromisoformat(routine_data["end_date"])
+                    tasks = []
+                    for saved_task in saved_tasks:
+                        task_data = dict(saved_task)
+                        original = datetime.fromisoformat(task_data.pop("original_date_time"))
+                        task_data["scheduled_date_time"] = datetime.fromisoformat(task_data["scheduled_date_time"])
+                        task_data["priority"] = Priority(task_data["priority"])
+                        if not isinstance(task_data["completion_status"], bool):
+                            raise ValueError("Task completion status must be a boolean")
+                        task = CareTask(task_id=task_data.pop("task_id"), **task_data)
+                        task.original_date_time = original
+                        tasks.append(task)
+                    routine = CareRoutine(
+                        routine_id=routine_data.pop("routine_id"), **routine_data, tasks=tasks,
+                    )
+                    if routine.pet_id != pet.pet_id:
+                        raise ValueError("Routine belongs to another pet")
+                    # add_routine() would seed new occurrences while loading.
+                    pet.routines.append(routine)
+                owner.pets.append(pet)
+
+            owner.sync_id_counters()
+        except (KeyError, TypeError, ValueError) as error:
+            raise ValueError(f"Invalid PawPal data: {error}") from error
+
+        return owner
+
     def set_preferences(
         self,
         available_start: time | None = None,
@@ -430,7 +541,7 @@ class PetOwner:
         raise LookupError(f"no routine found for task {task.task_id}")
 
     def view_todays_tasks(self) -> list[CareTask]:
-        """Only tasks dated today, sorted by time."""
+        """Only tasks dated today, sorted by priority and then time."""
         return Scheduler(self).todays_tasks()
 
     def view_overdue_tasks(self) -> list[CareTask]:
@@ -472,19 +583,26 @@ class Scheduler:
             tasks = self.owner.get_all_tasks()
         return sorted(tasks, key=lambda t: (t.scheduled_date_time, -t.priority.rank, t.title))
 
-    def get_tasks(self) -> list[CareTask]:
-        """Return all pets' tasks in schedule order, including completed care."""
-        return self.sort_by_time()
+    def sort_by_priority(self, tasks: list[CareTask] | None = None) -> list[CareTask]:
+        """Sort High, Medium, Low first, then datetime, title and ID; leave inputs unchanged."""
+        if tasks is None:
+            tasks = self.owner.get_all_tasks()
+        return sorted(tasks, key=lambda t: (-t.priority.rank, t.scheduled_date_time, t.title, t.task_id))
 
-    def _sorted_where(self, keep) -> list[CareTask]:
-        return self.sort_by_time([t for t in self.owner.get_all_tasks() if keep(t)])
+    def get_tasks(self) -> list[CareTask]:
+        """Return all pets' tasks by priority, then time, including completed care."""
+        return self.sort_by_priority()
+
+    def _sorted_where(self, keep, *, chronological: bool = False) -> list[CareTask]:
+        tasks = [t for t in self.owner.get_all_tasks() if keep(t)]
+        return self.sort_by_time(tasks) if chronological else self.sort_by_priority(tasks)
 
     def tasks_on(self, day: date) -> list[CareTask]:
-        """Return pending and completed tasks dated on the given day in schedule order."""
+        """Return pending and completed tasks for a day by priority, then time."""
         return self._sorted_where(lambda t: t.scheduled_date_time.date() == day)
 
     def todays_tasks(self) -> list[CareTask]:
-        """Tasks dated today (completed or not), sorted by time."""
+        """Tasks dated today (completed or not), sorted by priority and then time."""
         return self.tasks_on(_today())
 
     def generate_schedule(self, day: date) -> DailyPlan:
@@ -511,10 +629,7 @@ class Scheduler:
             window_start = datetime.combine(day, self.owner.available_start)
             window_end = datetime.combine(day, self.owner.available_end)
 
-        pending = sorted(
-            (task for task in tasks if not task.completion_status),
-            key=lambda task: (-task.priority.rank, task.scheduled_date_time, task.title, task.task_id),
-        )
+        pending = [task for task in tasks if not task.completion_status]
         for task in pending:
             if window_start is not None and not (
                 window_start <= task.scheduled_date_time and task.end_date_time <= window_end
@@ -546,15 +661,16 @@ class Scheduler:
             if plan.remaining_minutes is not None:
                 plan.remaining_minutes -= task.duration_minutes
 
-        plan.included = self.sort_by_time(plan.included)
-        plan.excluded = self.sort_by_time(plan.excluded)
+        plan.included = self.sort_by_priority(plan.included)
+        plan.excluded = self.sort_by_priority(plan.excluded)
         return plan
 
     def overdue_tasks(self) -> list[CareTask]:
         """Incomplete tasks dated before today, sorted by time."""
         today = _today()
         return self._sorted_where(
-            lambda t: not t.completion_status and t.scheduled_date_time.date() < today
+            lambda t: not t.completion_status and t.scheduled_date_time.date() < today,
+            chronological=True,
         )
 
     def upcoming_tasks(self, days: int = 7) -> list[CareTask]:
@@ -562,13 +678,14 @@ class Scheduler:
         today = _today()
         last = today + timedelta(days=days)
         return self._sorted_where(
-            lambda t: not t.completion_status and today <= t.scheduled_date_time.date() <= last
+            lambda t: not t.completion_status and today <= t.scheduled_date_time.date() <= last,
+            chronological=True,
         )
 
     def filter_tasks(
         self, pet_name: str | None = None, completed: bool | None = None
     ) -> list[CareTask]:
-        """Tasks for one pet (by name, case-insensitive) and/or by completion status."""
+        """Filter by pet name/status, returning tasks by priority and then time."""
         wanted = pet_name.casefold() if pet_name is not None else None
         pet_of_routine = {
             routine.routine_id: pet.name.casefold()
@@ -588,7 +705,7 @@ class Scheduler:
         groups: list[list[CareTask]] = []
         current: list[CareTask] = []
         current_end: datetime | None = None
-        for task in self.get_tasks():
+        for task in self.sort_by_time():
             if task.completion_status:
                 continue
             if current and task.scheduled_date_time < current_end:
@@ -622,7 +739,7 @@ class Scheduler:
 
         needed = timedelta(minutes=duration)
         busy_tasks = [
-            t for t in self.get_tasks()
+            t for t in self.sort_by_time()
             if not t.completion_status and t.task_id != exclude_task_id
         ]
 

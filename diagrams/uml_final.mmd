@@ -25,6 +25,9 @@ classDiagram
         +Optional~time~ available_start
         +Optional~time~ available_end
         +Optional~int~ daily_care_minutes
+        +save_to_json(path="data.json") None
+        +load_from_json(path="data.json") PetOwner
+        +sync_id_counters() None
         +set_preferences(available_start=None, available_end=None, daily_care_minutes=None) None
         +add_pet(pet) None
         +remove_pet(pet) None
@@ -105,6 +108,7 @@ classDiagram
         <<dataclass>>
         +PetOwner owner
         +sort_by_time(tasks=None) List~CareTask~
+        +sort_by_priority(tasks=None) List~CareTask~
         +get_tasks() List~CareTask~
         +tasks_on(day) List~CareTask~
         +todays_tasks() List~CareTask~
