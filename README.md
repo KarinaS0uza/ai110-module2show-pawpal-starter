@@ -179,39 +179,51 @@ Not included in this plan
 (none)
 ```
 
-## 🧪 Testing PawPal+
+## Testing PawPal+
+
+After completing **Setup** and activating the virtual environment, run the automated tests from the project root:
 
 ```bash
 python -m pytest
 ```
 
-The saved pytest suite contains two tests: completing a task changes its status, and adding a routine to a pet increases that pet's task count.
+The backend suite in `tests/test_pawpal.py` covers:
 
-Sample test output:
+- Task completion status and task creation when a routine is added to a pet.
+- Chronological sorting, with priority and title breaking ties.
+- Pet/routine/task links and daily, weekly and monthly schedule generation.
+- Creating the next day's task when daily care is completed.
+- Filtering by pet, completion status or both.
+- Daily-plan minute totals and explanations for exclusions under optional Python time limits.
+- Overlap detection and rescheduling while preserving the original occurrence's identity.
+- Overdue cleanup that preserves completed history and restarts an active recurring routine.
 
+Terminal output from a successful `python -m pytest` run (local path omitted):
+
+```text
+======================== test session starts ========================
+platform darwin -- Python 3.13.9, pytest-9.1.1, pluggy-1.7.0
+plugins: anyio-4.15.1
+collected 14 items
+
+tests/test_pawpal.py ..............                           [100%]
+
+======================== 14 passed in 0.07s =========================
 ```
-2 passed
-```
 
-Additional backend and Streamlit AppTest checks were run as temporary verification and removed after passing. They covered owner preferences, availability boundaries, priority and care-time decisions, completed care consuming the time allowance, explanations, task preservation, filters, recurring schedules, date bounds, duplicate prevention, completion controls and conflict rescheduling. All 55 checks passed before the extra tests were removed; the retained suite contains only the two tests above. The CLI demo also exercises overdue cleanup.
+**Confidence Level: ★★★★☆ (4/5 stars)**
 
-After the UI cleanup, 31 additional temporary checks verified that filtering and rendering preserved the original behavior. They compared pet/status views, completion in both plan lists, future recurring tasks, preference updates and conflict rescheduling, and checked that display filtering no longer reloads or sorts task history. Those checks passed and were deleted; both retained tests still pass.
+All 14 automated tests passed, giving confidence in the core backend workflows: scheduling, completion, filtering, daily-plan totals, conflict handling and overdue cleanup. The fifth star would require broader coverage, including automated Streamlit interface tests and edge cases such as month-end recurrence and repeated completion.
 
-The earlier care-focus version, since removed, passed 22 temporary checks covering classification, essential-only selection, saved preferences, completion and conflicts, plus comparisons with the previous scheduler's time-limit selections. Those checks were removed; the two required tests remain unchanged.
+For manual checks of the Streamlit interface, run `streamlit run app.py` and try these workflows:
 
-The earlier visual conflict view passed 10 temporary checks for exact overlap intervals, colors, free gaps, touching boundaries, filters, excluded and completed tasks, recurrence, midnight boundaries and manual moves. A browser preview confirmed the colors and automatic refresh after a move. The temporary checks were removed.
+1. Add two pets and schedule several tasks, including two with overlapping times. Generate a schedule and check task order, time ranges and minute totals.
+2. Apply the pet and status filters. Confirm the visible rows change while the plan's totals still cover all pets.
+3. Complete a daily task scheduled for today. Confirm it appears completed and its next occurrence appears tomorrow. Future recurring tasks should have disabled Done checkboxes.
+4. Review an overlap using **Reschedule a task** and move one task to a free time. For another overlap, choose **Keep both** and confirm its warning clears without changing the tasks.
+5. To exercise overdue care, restart with `PAWPAL_TESTING=1 streamlit run app.py`, use the testing-only section to add sample overdue tasks, then try completing and deleting them in **Overdue Tasks**.
 
-The former pet-by-time grid passed nine temporary checks for 30-minute columns, per-pet cells, partial-slot overlaps, touching task boundaries, filters, completion, manual moves and midnight clipping. The grid has since been removed. The extra checks were removed, leaving the two required tests unchanged.
-
-Manual overlap review passed 13 temporary Streamlit checks covering Keep both, unchanged care, filters, recurring occurrences, changed times and durations, overlapping chains, completion, manual rescheduling, cancellation and midnight boundaries. All passed alongside the two required tests; the temporary checks were removed.
-
-The earlier data-editor completion controls passed ten temporary checks for checkbox editing, recurrence, reopening, filter changes, excluded tasks, future recurring protection and edit-state reset. A browser click verified that checking Done updates completion, totals and conflicts. The extra checks were removed; the two required tests remain unchanged.
-
-Seven additional temporary checks verified inline completion in both plan tables, task movement between them, filters, recurrence, future care and independent edit state. These checks passed and were removed; only the two required tests remain.
-
-Removing optional-care selection passed eleven temporary checks for including all categories, ignoring old care-focus state, clearing saved app limits, preserving completion and filters, creating Meal tasks and matching the earlier Python time-limit decisions. The extra checks were removed; the two required tests remain unchanged.
-
-The current plan layout and reused task form passed 15 temporary Streamlit checks alongside the two required tests. They covered badge content, overview removal, category migration, complete form prefill, selecting either task, saving and canceling moves, task creation, recurrence, Done controls in both tables, future protection, filters, time formatting and escaped task text. A browser preview verified the colors, column alignment, checkboxes and automatic navigation. The temporary checks were removed.
+These interface workflows are manual checks; the retained pytest suite tests the Python backend.
 
 ## 📐 Smarter Scheduling
 
