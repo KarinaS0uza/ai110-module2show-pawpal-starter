@@ -1,30 +1,4 @@
 classDiagram
-    %% Draft UML for PawPal+ (see reflection.md)
-    %% frequency is user-entered via a dropdown (ONCE/DAILY/WEEKLY/MONTHLY) plus an interval ("every N")
-    %%   e.g. trim nails every 2 weeks = WEEKLY, 2; monthly grooming = MONTHLY, 1; vet appointment = ONCE
-    %% IDs are auto-assigned from a counter; nobody types them
-    %% One CareRoutine per pet (same title, different times/days per pet)
-    %% Each child stores only its direct parent's ID (pet_id, routine_id); add_routine() sets pet_id, generate_tasks() sets routine_id
-    %% get_pet_for_task(): task.routine_id -> routine.pet_id -> pet
-    %% Scheduler: organizes tasks across all pets; it gets every task through PetOwner.get_all_tasks()
-    %% view_todays_tasks() and view_overdue_tasks() delegate to Scheduler so the logic lives in one place
-    %% view_todays_tasks(): only tasks dated today, sorted by time (completed or not)
-    %% view_overdue_tasks(): incomplete tasks dated before today, shown in a separate tab
-    %% clear_overdue_tasks(): deletes all overdue incomplete tasks
-    %% remove_routine(): sets is_active = False, deletes incomplete tasks, keeps completed ones as history
-    %% get_care_routines(): returns active and inactive routines (user's own tracking)
-    %% generate_tasks(): skips tasks whose original_date_time already exists (no duplicates)
-    %%   range is clamped: never before today or start_date, never after end_date (so deleted past tasks can't come back)
-    %%   generation window is 90 days ahead (GENERATION_DAYS); run when a routine is added/updated and each time the app opens
-    %% end_date is optional; a routine with no end_date repeats until removed
-    %% Possible future improvement: save data between sessions (for example one JSON file);
-    %%   ID counters would restart above the highest saved ID
-    %% reschedule(): changes only scheduled_date_time; original_date_time never changes
-    %% update_routine(): regenerates only tasks that are incomplete, in the future and not rescheduled
-    %% update_profile()/update_routine(): unknown field names raise ValueError; an invalid update_routine() is rolled back
-    %% find_conflicts(): groups of incomplete tasks whose time ranges overlap (start to start + duration_minutes)
-    %% Tasks copy duration_minutes and priority from their routine; same-time tasks are listed high priority first
-    %% set_completion_status(completion_status): UI passes Completed (True) or Not Completed (False); no toggling
 
     class Frequency {
         <<enumeration>>
@@ -39,6 +13,7 @@ classDiagram
         LOW
         MEDIUM
         HIGH
+        +int rank
     }
 
     class PetOwner {
@@ -46,10 +21,15 @@ classDiagram
         +string name
         +string email
         +List~Pet~ pets
+        +Optional~time~ available_start
+        +Optional~time~ available_end
+        +Optional~int~ daily_care_minutes
+        +set_preferences(available_start, available_end, daily_care_minutes) None
         +add_pet(pet) None
         +remove_pet(pet) None
         +get_all_tasks() List~CareTask~
         +get_pet_for_task(task) Pet
+        +get_routine_for_task(task) CareRoutine
         +view_todays_tasks() List~CareTask~
         +view_overdue_tasks() List~CareTask~
         +clear_overdue_tasks() None
@@ -60,7 +40,7 @@ classDiagram
         +string name
         +string species
         +string breed
-        +date birthday
+        +Optional~date~ birthday
         +string photo
         +string pet_needs
         +string care_instructions
@@ -73,25 +53,28 @@ classDiagram
 
     class CareRoutine {
         +int routine_id
-        +int pet_id
+        +Optional~int~ pet_id
         +string title
         +Frequency frequency
         +int interval
         +int duration_minutes
         +Priority priority
+        +string category
         +time scheduled_time
         +date start_date
-        +date end_date
+        +Optional~date~ end_date
         +bool is_active
         +List~CareTask~ tasks
         +update_routine(fields) None
-        +generate_tasks(range_start, range_end) List~CareTask~
+        +generate_tasks(range_start, range_end, first_only) List~CareTask~
+        +add_task(scheduled_date_time) CareTask
+        +complete_task(task) Optional~CareTask~
         +get_tasks() List~CareTask~
     }
 
     class CareTask {
         +int task_id
-        +int routine_id
+        +Optional~int~ routine_id
         +string title
         +datetime scheduled_date_time
         +datetime original_date_time
@@ -104,15 +87,30 @@ classDiagram
         +reschedule(new_date_time) None
     }
 
+    class DailyPlan {
+        +List~CareTask~ included
+        +List~CareTask~ excluded
+        +dict reasons
+        +int completed_minutes
+        +int planned_minutes
+        +Optional~int~ remaining_minutes
+    }
+
     class Scheduler {
         +PetOwner owner
+        +sort_by_time(tasks) List~CareTask~
         +get_tasks() List~CareTask~
         +tasks_on(day) List~CareTask~
         +todays_tasks() List~CareTask~
+        +generate_schedule(day) DailyPlan
+        +build_daily_plan(day) DailyPlan
         +overdue_tasks() List~CareTask~
         +upcoming_tasks(days) List~CareTask~
         +filter_tasks(pet_name, completed) List~CareTask~
         +find_conflicts() List~List~CareTask~~
+        +conflict_warning(group) string
+        +next_free_slot(duration, after, exclude_task_id) datetime
+        +mark_task_complete(task) Optional~CareTask~
     }
 
     PetOwner "1" *-- "0..*" Pet : owns
@@ -123,3 +121,5 @@ classDiagram
     CareTask ..> Priority : uses
     Scheduler --> PetOwner : gets tasks via get_all_tasks()
     PetOwner ..> Scheduler : view methods delegate to
+    Scheduler ..> DailyPlan : builds
+    DailyPlan --> CareTask : includes or excludes with reasons
